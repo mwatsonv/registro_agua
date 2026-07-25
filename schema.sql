@@ -1,0 +1,56 @@
+-- 1. Tabla de Condominios
+CREATE TABLE condominios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nombre VARCHAR(100) NOT NULL,
+    direccion TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 2. Tabla de Departamentos / Unidades
+CREATE TABLE departamentos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    condominio_id UUID REFERENCES condominios(id) ON DELETE CASCADE,
+    numero_depa VARCHAR(20) NOT NULL, -- ej: "Torre A - Dpto 402"
+    promedio_historico_m3 FLOAT DEFAULT 0.0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. Tabla de Lecturas (Ingesta de Contómetros)
+CREATE TABLE lecturas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    departamento_id UUID REFERENCES departamentos(id) ON DELETE CASCADE,
+    lectura_anterior FLOAT NOT NULL,
+    lectura_actual FLOAT NOT NULL,
+    consumo_m3 FLOAT NOT NULL,
+    alerta BOOLEAN DEFAULT FALSE,
+    tipo_alerta VARCHAR(50),
+    mensaje_observacion TEXT,
+    foto_url TEXT, -- URL de la foto subida al bucket
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 4. Tabla de Liquidaciones Mensuales (Prorrateo)
+CREATE TABLE liquidaciones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    condominio_id UUID REFERENCES condominios(id) ON DELETE CASCADE,
+    periodo VARCHAR(7) NOT NULL, -- ej: "2026-07"
+    total_medidor_general_m3 FLOAT NOT NULL,
+    total_suma_departamentos_m3 FLOAT NOT NULL,
+    consumo_areas_comunes_m3 FLOAT NOT NULL,
+    monto_total_factura FLOAT NOT NULL,
+    costo_por_m3 FLOAT NOT NULL,
+    desglose_json JSONB NOT NULL, -- Guardamos la respuesta estructurada de LiquidacionResponse
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 5. Tabla de Recibos Emitidos
+CREATE TABLE recibos_emitidos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    departamento_id VARCHAR(50) NOT NULL,
+    periodo VARCHAR(7) NOT NULL,
+    monto_a_pagar FLOAT NOT NULL,
+    html_code TEXT NOT NULL,
+    resumen_whatsapp TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
