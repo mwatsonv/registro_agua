@@ -19,21 +19,17 @@ if SUPABASE_URL and SUPABASE_KEY and SUPABASE_URL not in ("", "TU_SUPABASE_URL")
 else:
     print("Warning: Supabase credentials not configured or are using placeholders. Database features will be disabled.")
 
-async def guardar_lectura(departamento_id: str, respuesta_agente: dict, foto_url: str = None):
+async def guardar_lectura(departamento: str, lectura_m3: float, foto_url: str = None, incidencia: str = None):
     if not supabase:
         print("Warning: Supabase client is not initialized. Skipping database save.")
         return None
     data = {
-        "departamento_id": departamento_id,
-        "lectura_anterior": respuesta_agente.get("lectura_anterior", 0),
-        "lectura_actual": respuesta_agente.get("lectura_actual", 0),
-        "consumo_m3": respuesta_agente["consumo_m3"],
-        "alerta": respuesta_agente["alerta"],
-        "tipo_alerta": respuesta_agente.get("tipo_alerta"),
-        "mensaje_observacion": respuesta_agente["mensaje"],
-        "foto_url": foto_url
+        "departamento": departamento,
+        "lectura_m3": lectura_m3,
+        "foto_url": foto_url,
+        "incidencia": incidencia
     }
-    response = supabase.table("lecturas").insert(data).execute()
+    response = supabase.table("lecturas_agua").insert(data).execute()
     return response.data
 
 async def guardar_liquidacion(liquidacion_data: dict):

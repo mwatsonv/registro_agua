@@ -24,7 +24,6 @@ async def validar_y_guardar_lectura(
     lectura_actual: float = Form(...),
     foto: UploadFile = File(None)
 ):
-    # 1. Subir la foto de evidencia al bucket de Supabase si existe y el cliente está configurado
     foto_url = None
     if foto:
         if not supabase:
@@ -36,10 +35,8 @@ async def validar_y_guardar_lectura(
                 supabase.storage.from_("evidencias-contometros").upload(file_path, file_bytes)
                 foto_url = supabase.storage.from_("evidencias-contometros").get_public_url(file_path)
             except Exception as e:
-                # We catch storage exceptions in case the bucket doesn't exist or credentials fail
                 print(f"Warning: Failed to upload file to Supabase storage: {e}")
 
-    # 2. Ejecutar el Agente de Ingesta en Antigravity
     respuesta = await agente_ingesta.run(
         prompt=f"""
         Departamento: {departamento_id}
@@ -48,26 +45,29 @@ async def validar_y_guardar_lectura(
         """,
         attachments=[foto] if foto else []
     )
-    resultado_json = respuesta.structured_output.dict()
+    
+    # Obtenemos el objeto estructurado directamente
+    st_out = respuesta.structured_output
+    resultado_json = st_out.dict() if hasattr(st_out, 'dict') else st_out
 
-    # 3. Guardar en Base de Datos
     await guardar_lectura(
-        departamento_id=departamento_id,
-        respuesta_agente={**resultado_json, "lectura_anterior": lectura_anterior, "lectura_actual": lectura_actual},
-        foto_url=foto_url
+        departamento=departamento_id,
+        lectura_m3=lectura_actual,
+        foto_url=foto_url,
+        incidencia=resultado_json.get("mensaje") if isinstance(resultado_json, dict) else getattr(resultado_json, 'mensaje', None)
     )
 
-    return respuesta.structured_output
+    return st_out
 
 @app.post("/api/liquidar-mes", response_model=LiquidacionResponse)
 async def liquidar_y_guardar_mes(datos: dict):
-    # 1. Ejecutar el Agente de Prorrateo
     respuesta = await agente_prorrateo.run(
         prompt=f"Procesa la liquidación con la siguiente información: {datos}"
     )
-    liquidacion_dict = respuesta.structured_output.dict()
+    
+    st_out = respuesta.structured_output
+    liquidacion_dict = st_out.dict() if hasattr(st_out, 'dict') else st_out
 
-    # 2. Persistir el resumen financiero
     db_record = {
         "condominio_id": liquidacion_dict["condominio_id"],
         "periodo": liquidacion_dict["periodo"],
@@ -80,28 +80,27 @@ async def liquidar_y_guardar_mes(datos: dict):
     }
     await guardar_liquidacion(db_record)
 
-    return respuesta.structured_output
+    return st_out
 
 @app.post("/api/generar-reportes", response_model=ReporteMensualResponse)
 async def generar_reportes_mes(datos_liquidacion: dict):
-    """
-    Genera las plantillas HTML (PDFs) y los mensajes de WhatsApp
-    para cada departamento basándose en la liquidación procesada.
-    """
     respuesta = await agente_reportes.run(
         prompt=f"Genera las fichas de cobro y mensajes a partir de esta liquidación: {datos_liquidacion}"
     )
-    reporte_dict = respuesta.structured_output.dict()
+    
+    st_out = respuesta.structured_output
+    reporte_dict = st_out.dict() if hasattr(st_out, 'dict') else st_out
 
-    # Guardar cada recibo generado en la base de datos
-    for recibo in reporte_dict.get("recibos", []):
+    recibos = reporte_dict.get("recibos", []) if isinstance(reporte_dict, dict) else getattr(reporte_dict, 'recibos', [])
+    for recibo in recibos:
+        r_dict = recibo.dict() if hasattr(recibo, 'dict') else recibo
         db_record = {
-            "departamento_id": recibo["departamento_id"],
-            "periodo": recibo["periodo"],
-            "monto_a_pagar": recibo["monto_a_pagar"],
-            "html_code": recibo["html_code"],
-            "resumen_whatsapp": recibo["resumen_whatsapp"]
+            "departamento_id": r_dict["departamento_id"],
+            "periodo": r_dict["periodo"],
+            "monto_a_pagar": r_dict["monto_a_pagar"],
+            "html_code": r_dict["html_code"],
+            "resumen_whatsapp": r_dict["resumen_whatsapp"]
         }
         await guardar_recibos_generados(db_record)
 
-    return respuesta.structured_output
+    return st_out

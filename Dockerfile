@@ -1,23 +1,22 @@
-# Imagen base ligera de Python
+# Imagen base oficial de Python
 FROM python:3.11-slim
 
-# Evitar la creación de archivos .pyc y forzar logs inmediatos en consola
+# Evitar que Python escriba archivos .pyc en disco
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Directorio de trabajo
 WORKDIR /app
 
-# Copiar e instalar dependencias primero
+# Instalar dependencias
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el resto del código del proyecto
+# Copiar el código del proyecto
 COPY . .
 
-# Puerto dinámico expuesto por Cloud Run / Render
-ENV PORT=8080
+# Exponer el puerto que asigna Cloud Run (por defecto 8080)
 EXPOSE 8080
 
-# Comando ajustado a la estructura de tu proyecto
-CMD ["sh", "-c", "uvicorn main:app --app-dir cerebro_condominios --host 0.0.0.0 --port ${PORT}"]
+# Comando para arrancar FastAPI en producción
+CMD ["uvicorn", "cerebro_condominios.main:app", "--host", "0.0.0.0", "--port", "8080"]
