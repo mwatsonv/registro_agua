@@ -26,16 +26,26 @@ app = FastAPI(title="Cerebro de Agua para Condominios")
 
 
 def extraer_dict(obj):
-  """Pinta atributos Pydantic o diccionarios a un dict nativo de forma síncrona."""
-  if obj is None:
-    return {}
-  if isinstance(obj, dict):
-    return obj
-  if hasattr(obj, "model_dump"):
-    return obj.model_dump()
-  if hasattr(obj, "dict"):
-    return obj.dict()
-  return {"raw": str(obj)}
+    """Sincrónicamente convierte un objeto Pydantic, respuesta de SDK o dict en un diccionario estándar."""
+    if obj is None:
+        return {}
+    
+    # 1. Si es un método o función (como ChatResponse.structured_output), lo ejecutamos
+    if callable(obj):
+        try:
+            obj = obj()
+        except Exception as e:
+            print(f"Error invocando callable en extraer_dict: {e}")
+
+    # 2. Evaluación de tipos de datos
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "model_dump"):  # Pydantic v2
+        return obj.model_dump()
+    if hasattr(obj, "dict"):        # Pydantic v1
+        return obj.dict()
+        
+    return {"raw": str(obj)}
 
 
 # Función síncrona para envolver la ejecución de los agentes
