@@ -1,4 +1,3 @@
-import asyncio
 import inspect
 import os
 import sys
@@ -27,52 +26,36 @@ app = FastAPI(title="Cerebro de Agua para Condominios")
 
 
 def extraer_dict(obj):
-  """Sincrónicamente convierte un objeto Pydantic, dict o respuesta en un diccionario estándar."""
+  """Pinta atributos Pydantic o diccionarios a un dict nativo."""
   if obj is None:
     return {}
   if isinstance(obj, dict):
     return obj
-  if hasattr(obj, "model_dump"):  # Pydantic v2
+  if hasattr(obj, "model_dump"):
     return obj.model_dump()
-  if hasattr(obj, "dict"):  # Pydantic v1
+  if hasattr(obj, "dict"):
     return obj.dict()
   return {"raw": str(obj)}
 
 
-def ejecutar_agente_sync(agente, prompt, attachments=None):
-  """Ejecuta el agente y resuelve de forma sincrónica el método estructurado asíncrono."""
-
-  async def _tarea():
-    # 1. Invocación del agente
-    if asyncio.iscoroutinefunction(agente.run):
-      respuesta = await agente.run(
-          prompt=prompt, attachments=attachments or []
-      )
-    else:
-      respuesta = agente.run(prompt=prompt, attachments=attachments or [])
-
-    # 2. Extracción de structured_output
-    if hasattr(respuesta, "structured_output"):
-      st_attr = respuesta.structured_output
-      # Si es un método o función
-      if callable(st_attr):
-        res_st = st_attr()
-        # Si la llamada devuelve una corrutina (async)
-        if inspect.isawaitable(res_st):
-          st_out = await res_st
-        else:
-          st_out = res_st
-      elif inspect.isawaitable(st_attr):
-        st_out = await st_attr
+async def obtener_structured_output(respuesta):
+  """Extrae y resuelve el output estructurado del objeto ChatResponse."""
+  if hasattr(respuesta, "structured_output"):
+    st_attr = respuesta.structured_output
+    if callable(st_attr):
+      res_st = st_attr()
+      if inspect.isawaitable(res_st):
+        st_out = await res_st
       else:
-        st_out = st_attr
+        st_out = res_st
+    elif inspect.isawaitable(st_attr):
+      st_out = await st_attr
     else:
-      st_out = respuesta
+      st_out = st_attr
+  else:
+    st_out = respuesta
 
-    return extraer_dict(st_out)
-
-  # Corre la tarea de forma sincrónica aislada
-  return asyncio.run(_tarea())
+  return extraer_dict(st_out)
 
 
 @app.post("/api/validar-lectura")
@@ -105,9 +88,9 @@ async def validar_y_guardar_lectura(
         Lectura Actual: {lectura_actual}
         """
 
-    resultado_dict = await asyncio.to_thread(
-        ejecutar_agente_sync, agente_ingesta, prompt_str, []
-    )
+    # Ejecución directa en el loop principal de FastAPI
+    respuesta = await agente_ingesta.run(prompt=prompt_str, attachments=[])
+    resultado_dict = await obtener_structured_output(respuesta)
 
     try:
       await guardar_lectura(
@@ -134,9 +117,9 @@ async def liquidar_y_guardar_mes(datos: dict):
   try:
     prompt_str = f"Procesa la liquidación con la siguiente información: {datos}"
 
-    liquidacion_dict = await asyncio.to_thread(
-        ejecutar_agente_sync, agente_prorrateo, prompt_str, []
-    )
+    # Ejecución directa en el loop principal de FastAPI
+    respuesta = await agente_prorrateo.run(prompt=prompt_str, attachments=[])
+    liquidacion_dict = await obtener_structured_output(respuesta)
 
     try:
       db_record = {
@@ -179,13 +162,8 @@ async def generar_reportes_mes(datos_liquidacion: dict):
         f" {datos_liquidacion}"
     )
 
-    # ✅ AISLAMIENTO EN THREAD
-    respuesta = await asyncio.to_thread(
-        ejecutar_agente_sync, agente_reportes, prompt_str, []
-    )
-
-    st_out = getattr(respuesta, "structured_output", respuesta)
-    reporte_dict = extraer_dict(st_out)
+    respuesta = await agente_reportes.run(prompt=prompt_str, attachments=[])
+    reporte_dict = await obtener_structured_output(respuesta)
 
     recibos = reporte_dict.get("recibos", [])
     for recibo in recibos:
