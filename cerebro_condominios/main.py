@@ -2,7 +2,7 @@ import os
 import sys
 import traceback
 
-# Configurar paths
+# Configuración de paths
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.append(root_dir)
@@ -14,13 +14,18 @@ from fastapi import FastAPI, UploadFile, File, Form
 from agentes.ingesta import agente_ingesta
 from agentes.prorrateo import agente_prorrateo
 from agentes.reportes import agente_reportes
-from tools.supabase_client import supabase, guardar_lectura, guardar_liquidacion, guardar_recibos_generados
+from tools.supabase_client import (
+    supabase,
+    guardar_lectura,
+    guardar_liquidacion,
+    guardar_recibos_generados,
+)
 
 app = FastAPI(title="Cerebro de Agua para Condominios")
 
 
 def extraer_dict(obj):
-    """Sincrónicamente convierte un objeto Pydantic o dict en un diccionario estándar."""
+    """Sincrónicamente convierte un objeto Pydantic, respuesta de SDK o dict en un diccionario estándar."""
     if obj is None:
         return {}
     if isinstance(obj, dict):
@@ -41,26 +46,29 @@ async def validar_y_guardar_lectura(
 ):
     try:
         foto_url = None
-        if foto and supabase:
-            file_bytes = await foto.read()
-            file_path = f"medidores/{departamento_id}_{foto.filename}"
-            try:
-                supabase.storage.from_("evidencias-contometros").upload(file_path, file_bytes)
-                foto_url = supabase.storage.from_("evidencias-contometros").get_public_url(file_path)
-            except Exception as e:
-                print(f"Warning upload Supabase: {e}")
+        
+        # Validar explícitamente que foto exista y tenga contenido
+        if foto is not None and getattr(foto, "filename", None):
+            if supabase:
+                try:
+                    file_bytes = await foto.read()
+                    if file_bytes:
+                        file_path = f"medidores/{departamento_id}_{foto.filename}"
+                        supabase.storage.from_("evidencias-contometros").upload(file_path, file_bytes)
+                        foto_url = supabase.storage.from_("evidencias-contometros").get_public_url(file_path)
+                except Exception as e:
+                    print(f"Warning upload Supabase: {e}")
 
-        # Invocación directa del agente
+        # Invocación directa del agente de ingesta
         respuesta = await agente_ingesta.run(
             prompt=f"""
             Departamento: {departamento_id}
             Lectura Anterior: {lectura_anterior}
             Lectura Actual: {lectura_actual}
             """,
-            attachments=[foto] if foto else []
+            attachments=[foto] if (foto is not None and getattr(foto, "filename", None)) else []
         )
 
-        # Extraer el resultado estructurado
         st_out = getattr(respuesta, "structured_output", respuesta)
         resultado_dict = extraer_dict(st_out)
 
