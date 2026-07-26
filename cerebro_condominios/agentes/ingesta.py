@@ -10,7 +10,7 @@ class IngestaResponse(BaseModel):
 
 # Definición del Agente de Ingesta
 agente_ingesta = Agent(
-    model="gemini-1.5-flash",  # Modelo rápido y económico para imágenes/OCR
+    model="gemini-2.0-flash",  # Modelo rápido y económico para imágenes/OCR
     system_instruction="""
     Eres el Agente Auditor de Lecturas de Agua para Condominios.
     Tu trabajo es:

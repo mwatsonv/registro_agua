@@ -22,7 +22,7 @@ class LiquidacionResponse(BaseModel):
 
 # Definición del Agente de Prorrateo
 agente_prorrateo = Agent(
-    model="gemini-1.5-flash",
+    model="gemini-2.0-flash",
     response_schema=LiquidacionResponse,
     system_instruction="""
     Eres el Agente Financiero de Liquidación de Agua para Condominios.
