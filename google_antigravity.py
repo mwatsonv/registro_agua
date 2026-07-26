@@ -20,8 +20,8 @@ class ChatResponseWrapper:
         return CallableString(val)
 
     @property
-    def structured_output(self):
-        return self._real_response.structured_output()
+def structured_output(self):
+    return getattr(self._real_response, "structured_output", None)
 
     def __getattr__(self, name):
         return getattr(self._real_response, name)
