@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Ensure both project root and cerebro_condominios are in the path
+# Formatear rutas del sistema
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.append(root_dir)
@@ -10,12 +10,22 @@ if condo_dir not in sys.path:
     sys.path.append(condo_dir)
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from agentes.ingesta import agente_ingesta, IngestaResponse
-from agentes.prorrateo import agente_prorrateo, LiquidacionResponse
-from agentes.reportes import agente_reportes, ReporteMensualResponse
+from agentes.ingesta import agente_ingesta
+from agentes.prorrateo import agente_prorrateo
+from agentes.reportes import agente_reportes
 from tools.supabase_client import supabase, guardar_lectura, guardar_liquidacion, guardar_recibos_generados
 
 app = FastAPI(title="Cerebro de Agua para Condominios")
+
+def deserializar_salida(st_out):
+    """Convierte respuestas estructuradas de Pydantic o la SDK a un dict estándar de Python"""
+    if hasattr(st_out, "model_dump"):
+        return st_out.model_dump()
+    elif hasattr(st_out, "dict"):
+        return st_out.dict()
+    elif isinstance(st_out, dict):
+        return st_out
+    return {}
 
 @app.post("/api/validar-lectura")
 async def validar_y_guardar_lectura(
@@ -27,7 +37,7 @@ async def validar_y_guardar_lectura(
     foto_url = None
     if foto:
         if not supabase:
-            print("Warning: Supabase client not initialized. Cannot upload photo.")
+            print("Warning: Supabase client not initialized.")
         else:
             file_bytes = await foto.read()
             file_path = f"medidores/{departamento_id}_{foto.filename}"
@@ -35,9 +45,9 @@ async def validar_y_guardar_lectura(
                 supabase.storage.from_("evidencias-contometros").upload(file_path, file_bytes)
                 foto_url = supabase.storage.from_("evidencias-contometros").get_public_url(file_path)
             except Exception as e:
-                print(f"Warning: Failed to upload file to Supabase storage: {e}")
+                print(f"Warning: Failed to upload file to Supabase: {e}")
 
-    # Ejecutamos el agente
+    # Invocación al agente
     respuesta = await agente_ingesta.run(
         prompt=f"""
         Departamento: {departamento_id}
@@ -47,11 +57,8 @@ async def validar_y_guardar_lectura(
         attachments=[foto] if foto else []
     )
     
-    # Extraemos el output sin intermediarios bloqueantes
-    st_out = respuesta.structured_output
-    
-    # Convertimos a dict para guardar en BD
-    resultado_dict = st_out.dict() if hasattr(st_out, 'dict') else (st_out if isinstance(st_out, dict) else {})
+    # Extraer y estructurar dict
+    resultado_dict = deserializar_salida(respuesta.structured_output)
 
     try:
         await guardar_lectura(
@@ -63,7 +70,7 @@ async def validar_y_guardar_lectura(
     except Exception as e:
         print(f"Error guardando en Supabase: {e}")
 
-    return st_out
+    return resultado_dict
 
 
 @app.post("/api/liquidar-mes")
@@ -72,8 +79,7 @@ async def liquidar_y_guardar_mes(datos: dict):
         prompt=f"Procesa la liquidación con la siguiente información: {datos}"
     )
     
-    st_out = respuesta.structured_output
-    liquidacion_dict = st_out.dict() if hasattr(st_out, 'dict') else (st_out if isinstance(st_out, dict) else {})
+    liquidacion_dict = deserializar_salida(respuesta.structured_output)
 
     try:
         db_record = {
@@ -90,7 +96,7 @@ async def liquidar_y_guardar_mes(datos: dict):
     except Exception as e:
         print(f"Error guardando liquidacion en Supabase: {e}")
 
-    return st_out
+    return liquidacion_dict
 
 
 @app.post("/api/generar-reportes")
@@ -99,13 +105,12 @@ async def generar_reportes_mes(datos_liquidacion: dict):
         prompt=f"Genera las fichas de cobro y mensajes a partir de esta liquidación: {datos_liquidacion}"
     )
     
-    st_out = respuesta.structured_output
-    reporte_dict = st_out.dict() if hasattr(st_out, 'dict') else (st_out if isinstance(st_out, dict) else {})
+    reporte_dict = deserializar_salida(respuesta.structured_output)
 
     recibos = reporte_dict.get("recibos", [])
     for recibo in recibos:
         try:
-            r_dict = recibo.dict() if hasattr(recibo, 'dict') else recibo
+            r_dict = deserializar_salida(recibo)
             db_record = {
                 "departamento_id": r_dict.get("departamento_id"),
                 "periodo": r_dict.get("periodo"),
@@ -117,4 +122,4 @@ async def generar_reportes_mes(datos_liquidacion: dict):
         except Exception as e:
             print(f"Error guardando recibo en Supabase: {e}")
 
-    return st_out
+    return reporte_dict
