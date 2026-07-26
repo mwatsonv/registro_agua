@@ -9,6 +9,7 @@ condo_dir = os.path.join(root_dir, "cerebro_condominios")
 if condo_dir not in sys.path:
     sys.path.append(condo_dir)
 
+import inspect
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from agentes.ingesta import agente_ingesta
 from agentes.prorrateo import agente_prorrateo
@@ -17,15 +18,28 @@ from tools.supabase_client import supabase, guardar_lectura, guardar_liquidacion
 
 app = FastAPI(title="Cerebro de Agua para Condominios")
 
-def deserializar_salida(st_out):
-    """Convierte respuestas estructuradas de Pydantic o la SDK a un dict estándar de Python"""
+async def deserializar_salida(st_out):
+    """Resuelve corrutinas pendientes y convierte modelos Pydantic a diccionarios estándar."""
+    # 1. Si es una corrutina o un awaitable, lo resolvemos
+    if inspect.isawaitable(st_out):
+        st_out = await st_out
+    
+    # 2. Si la propiedad structured_output es una función o método invocable
+    if callable(st_out):
+        st_out = st_out()
+        if inspect.isawaitable(st_out):
+            st_out = await st_out
+
+    # 3. Serializamos desde Pydantic v1 / v2 o diccionario
     if hasattr(st_out, "model_dump"):
         return st_out.model_dump()
     elif hasattr(st_out, "dict"):
         return st_out.dict()
     elif isinstance(st_out, dict):
         return st_out
+    
     return {}
+
 
 @app.post("/api/validar-lectura")
 async def validar_y_guardar_lectura(
@@ -57,8 +71,8 @@ async def validar_y_guardar_lectura(
         attachments=[foto] if foto else []
     )
     
-    # Extraer y estructurar dict
-    resultado_dict = deserializar_salida(respuesta.structured_output)
+    # Extraer y estructurar dict con await
+    resultado_dict = await deserializar_salida(respuesta.structured_output)
 
     try:
         await guardar_lectura(
@@ -79,7 +93,7 @@ async def liquidar_y_guardar_mes(datos: dict):
         prompt=f"Procesa la liquidación con la siguiente información: {datos}"
     )
     
-    liquidacion_dict = deserializar_salida(respuesta.structured_output)
+    liquidacion_dict = await deserializar_salida(respuesta.structured_output)
 
     try:
         db_record = {
@@ -105,12 +119,12 @@ async def generar_reportes_mes(datos_liquidacion: dict):
         prompt=f"Genera las fichas de cobro y mensajes a partir de esta liquidación: {datos_liquidacion}"
     )
     
-    reporte_dict = deserializar_salida(respuesta.structured_output)
+    reporte_dict = await deserializar_salida(respuesta.structured_output)
 
     recibos = reporte_dict.get("recibos", [])
     for recibo in recibos:
         try:
-            r_dict = deserializar_salida(recibo)
+            r_dict = await deserializar_salida(recibo)
             db_record = {
                 "departamento_id": r_dict.get("departamento_id"),
                 "periodo": r_dict.get("periodo"),
