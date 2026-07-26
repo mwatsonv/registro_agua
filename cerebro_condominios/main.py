@@ -26,35 +26,52 @@ app = FastAPI(title="Cerebro de Agua para Condominios")
 
 
 def extraer_dict(obj):
-    """Sincrónicamente convierte un objeto Pydantic, respuesta de SDK o dict en un diccionario estándar."""
-    if obj is None:
-        return {}
-    
-    # 1. Si es un método o función (como ChatResponse.structured_output), lo ejecutamos
-    if callable(obj):
-        try:
-            obj = obj()
-        except Exception as e:
-            print(f"Error invocando callable en extraer_dict: {e}")
-
-    # 2. Evaluación de tipos de datos
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "model_dump"):  # Pydantic v2
-        return obj.model_dump()
-    if hasattr(obj, "dict"):        # Pydantic v1
-        return obj.dict()
-        
-    return {"raw": str(obj)}
+  """Sincrónicamente convierte un objeto Pydantic, dict o respuesta en un diccionario estándar."""
+  if obj is None:
+    return {}
+  if isinstance(obj, dict):
+    return obj
+  if hasattr(obj, "model_dump"):  # Pydantic v2
+    return obj.model_dump()
+  if hasattr(obj, "dict"):  # Pydantic v1
+    return obj.dict()
+  return {"raw": str(obj)}
 
 
-# Función síncrona para envolver la ejecución de los agentes
 def ejecutar_agente_sync(agente, prompt, attachments=None):
-  if asyncio.iscoroutinefunction(agente.run):
-    return asyncio.run(
-        agente.run(prompt=prompt, attachments=attachments or [])
-    )
-  return agente.run(prompt=prompt, attachments=attachments or [])
+  """Ejecuta el agente y resuelve de forma sincrónica el método estructurado asíncrono."""
+
+  async def _tarea():
+    # 1. Invocación del agente
+    if asyncio.iscoroutinefunction(agente.run):
+      respuesta = await agente.run(
+          prompt=prompt, attachments=attachments or []
+      )
+    else:
+      respuesta = agente.run(prompt=prompt, attachments=attachments or [])
+
+    # 2. Extracción de structured_output
+    if hasattr(respuesta, "structured_output"):
+      st_attr = respuesta.structured_output
+      # Si es un método o función
+      if callable(st_attr):
+        res_st = st_attr()
+        # Si la llamada devuelve una corrutina (async)
+        if inspect.isawaitable(res_st):
+          st_out = await res_st
+        else:
+          st_out = res_st
+      elif inspect.isawaitable(st_attr):
+        st_out = await st_attr
+      else:
+        st_out = st_attr
+    else:
+      st_out = respuesta
+
+    return extraer_dict(st_out)
+
+  # Corre la tarea de forma sincrónica aislada
+  return asyncio.run(_tarea())
 
 
 @app.post("/api/validar-lectura")
@@ -66,7 +83,6 @@ async def validar_y_guardar_lectura(
 ):
   try:
     foto_url = None
-
     if foto is not None and getattr(foto, "filename", None):
       if supabase:
         try:
@@ -88,13 +104,9 @@ async def validar_y_guardar_lectura(
         Lectura Actual: {lectura_actual}
         """
 
-    # ✅ AISLAMIENTO EN THREAD: Evita el congelamiento del event loop
-    respuesta = await asyncio.to_thread(
+    resultado_dict = await asyncio.to_thread(
         ejecutar_agente_sync, agente_ingesta, prompt_str, []
     )
-
-    st_out = getattr(respuesta, "structured_output", respuesta)
-    resultado_dict = extraer_dict(st_out)
 
     try:
       await guardar_lectura(
@@ -121,13 +133,9 @@ async def liquidar_y_guardar_mes(datos: dict):
   try:
     prompt_str = f"Procesa la liquidación con la siguiente información: {datos}"
 
-    # ✅ AISLAMIENTO EN THREAD
-    respuesta = await asyncio.to_thread(
+    liquidacion_dict = await asyncio.to_thread(
         ejecutar_agente_sync, agente_prorrateo, prompt_str, []
     )
-
-    st_out = getattr(respuesta, "structured_output", respuesta)
-    liquidacion_dict = extraer_dict(st_out)
 
     try:
       db_record = {
