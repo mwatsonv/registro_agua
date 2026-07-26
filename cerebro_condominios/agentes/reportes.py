@@ -17,7 +17,7 @@ class ReporteMensualResponse(BaseModel):
 
 # Definición del Agente de Reportes
 agente_reportes = Agent(
-    model="gemini-1.5-flash",
+    model="gemini-1.5-flash-latest",
     response_schema=ReporteMensualResponse,
     system_instruction="""
     Eres el Agente Diseñador de Recibos y Comunicaciones para Condominios.
