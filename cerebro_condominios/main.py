@@ -1,5 +1,6 @@
 import os
 import sys
+import inspect
 
 # Ensure both project root and cerebro_condominios are in the path
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +17,17 @@ from agentes.reportes import agente_reportes, ReporteMensualResponse
 from tools.supabase_client import supabase, guardar_lectura, guardar_liquidacion, guardar_recibos_generados
 
 app = FastAPI(title="Cerebro de Agua para Condominios")
+
+
+async def _resolver_salida(respuesta_agente):
+    """Auxiliar para resolver de forma segura si es corrutina, método o propiedad directas."""
+    st_out = respuesta_agente.structured_output
+    if callable(st_out):
+        st_out = st_out()
+    if inspect.isawaitable(st_out):
+        st_out = await st_out
+    return st_out
+
 
 @app.post("/api/validar-lectura", response_model=IngestaResponse)
 async def validar_y_guardar_lectura(
@@ -46,8 +58,7 @@ async def validar_y_guardar_lectura(
         attachments=[foto] if foto else []
     )
     
-    # Obtenemos el objeto estructurado directamente
-    st_out = respuesta.structured_output
+    st_out = await _resolver_salida(respuesta)
     resultado_json = st_out.dict() if hasattr(st_out, 'dict') else st_out
 
     await guardar_lectura(
@@ -59,13 +70,14 @@ async def validar_y_guardar_lectura(
 
     return st_out
 
+
 @app.post("/api/liquidar-mes", response_model=LiquidacionResponse)
 async def liquidar_y_guardar_mes(datos: dict):
     respuesta = await agente_prorrateo.run(
         prompt=f"Procesa la liquidación con la siguiente información: {datos}"
     )
     
-    st_out = respuesta.structured_output
+    st_out = await _resolver_salida(respuesta)
     liquidacion_dict = st_out.dict() if hasattr(st_out, 'dict') else st_out
 
     db_record = {
@@ -82,13 +94,14 @@ async def liquidar_y_guardar_mes(datos: dict):
 
     return st_out
 
+
 @app.post("/api/generar-reportes", response_model=ReporteMensualResponse)
 async def generar_reportes_mes(datos_liquidacion: dict):
     respuesta = await agente_reportes.run(
         prompt=f"Genera las fichas de cobro y mensajes a partir de esta liquidación: {datos_liquidacion}"
     )
     
-    st_out = respuesta.structured_output
+    st_out = await _resolver_salida(respuesta)
     reporte_dict = st_out.dict() if hasattr(st_out, 'dict') else st_out
 
     recibos = reporte_dict.get("recibos", []) if isinstance(reporte_dict, dict) else getattr(reporte_dict, 'recibos', [])
